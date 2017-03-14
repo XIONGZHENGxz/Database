@@ -1,5 +1,6 @@
 #!/bin/usr/env python 
 import os
+import timeit
 import subprocess
 import apachetime
 import time
@@ -18,12 +19,6 @@ def apache_ts_to_unixtime(ts):
 	unixtime=time.mktime(dt.timetuple())
 	return int(unixtime)
 
-def sortFile(filePath):
-	tmp_sessions,path=tempfile.mkstemp()
-	output = subprocess.Popen(["tail", "-n","+2",filePath], stdout=subprocess.PIPE).communicate()[0]
-	os.write(tmp_sessions,output)
-	output=subprocess.Popen(["sort",path],stdout=subprocess.PIPE).communicate()[0]
-	return tmp_sessions
 	
 def process_logs(dataset_iter):
 
@@ -32,6 +27,8 @@ def process_logs(dataset_iter):
 		hitswriter=csv.writer(hits_file,delimiter=',',lineterminator='\n')
 		hitswriter.writerow(["ip","timestamp"])
 		for i,line in enumerate(dataset_iter):
+			if i==0:
+				continue
 			split_line=line.split("\t")
 			ip=split_line[0]
 			timestamp=split_line[2]
@@ -39,15 +36,19 @@ def process_logs(dataset_iter):
 	hits_file.close()
 
 	#create session.csv
-	tmp_sessions=sortFile("hits.csv")
+	tmp_sessions,path=tempfile.mkstemp()
+	output = subprocess.Popen(["tail", "-n","+2","hits.csv"], stdout=subprocess.PIPE).communicate()[0]
+	os.write(tmp_sessions,output)
+	output=subprocess.Popen(["sort",path],stdout=subprocess.PIPE).communicate()[0]
 	with open('session.csv','w+') as session_file:
 		sessionwriter = csv.writer(session_file,delimiter=',',lineterminator='\n')
-		sessionwriter.write(["ip","session_length","num_hits"])
+		sessionwriter.writerow(["ip","session_length","num_hits"])
 		#start calculating
 		flag=False # no data yet
 		wrote=False
 		pre_ip,pre_time,curr_len,curr_hits=0,-1,0,1
-		for line in tmp_sessions:
+		sorted_sessions=open(path,"r")
+		for line in sorted_sessions:
 			split_line=line.split(",")
 			curr_ip=split_line[0]
 			curr_time=int(split_line[1])
@@ -70,6 +71,8 @@ def process_logs(dataset_iter):
 		# check the last one
 		if not wrote:
 			sessionwriter.writerow([pre_ip,curr_len,curr_hits])
+		sorted_sessions.close()
+	os.close(tmp_sessions)
 	session_file.close()
 
 	#session_length_plot.csv
@@ -82,7 +85,8 @@ def process_logs(dataset_iter):
 		lenwriter.writerow(["left","right","count"])
 		curr_left,curr_right,curr_count=0,2,0
 		legit=False
-		for line in session_len_plot:
+		session_length=open(path,"r")
+		for line in session_length:
 			curr_len=line.split(",")[1]
 			if curr_len>=curr_left and curr_len<curr_right:
 				curr_count+=curr_count
@@ -96,17 +100,17 @@ def process_logs(dataset_iter):
 					curr_right*=2
 				curr_count=1
 			legit=True
-			
 		lenwriter.writerow([curr_left,curr_right,curr_count])
+		session_length.close()
 	session_len_file.close()
+	os.close(tmp_sessions)
 
+def process_log_small():
+	with open(DATA_DIR+"web_server.log") as f:
+		process_logs(f)
 
 if __name__=="__main__":
 	readData()
-	fd,path=tempfile.mkstemp()
-	output=subprocess.Popen(["tail","-n","+2","new.txt"], stdout=subprocess.PIPE).communicate()[0]
-	os.write(fd,output)
-	output=subprocess.Popen(["sort","-s", "-n","-t",",","-k2",path],stdout=subprocess.PIPE).communicate()[0]
-	print output
+	timeit.timeit(process_log_small,number=10000)
 	
 	
